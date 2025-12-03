@@ -27,7 +27,7 @@ metadata:
 spec:
   containers:
     - name: app
-      image: busybox
+      image: docker.io/busybox
       command:
         - sh
         - -c
@@ -37,7 +37,6 @@ spec:
           mountPath: /data
       securityContext:
         allowPrivilegeEscalation: false
-        runAsNonRoot: true
         capabilities:
           drop:
             - ALL
