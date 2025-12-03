@@ -91,3 +91,20 @@ systemctl status haproxy
 
 ______________________________________________________________________________________
 
+
+# Test Ingress
+
+kubectl apply -f test-ingress.yaml
+
+kubectl -n ingress-nginx get all -o wide
+
+kubectl get ingress -n test
+
+curl demo.test.local
+
+http://demo.test.local
+
+
+
+
+
