@@ -34,6 +34,13 @@ kubectl get pods -n ingress-nginx
 kubectl get svc -n ingress-nginx
 kubectl get ingressclass
 
+
+# Make change in deployment
+kubectl edit deploy nginx-ingress -n nginx-ingress
+
+(edit this line: "hostNetwork: true" blow line no- 37 -- spec==> automountServiceAccountToken: true)
+
+
 # From any node
 curl http://10.0.0.201:30080  # Should show 404 (working)
 
