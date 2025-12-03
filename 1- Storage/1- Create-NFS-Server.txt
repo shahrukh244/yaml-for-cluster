@@ -1,0 +1,36 @@
+# Install NFS
+
+
+
+# Update and install NFS server
+apt update
+apt install -y nfs-kernel-server
+
+# Create directories
+mkdir -p /shares/kubernetes/StorageClass/{Delete,Retain}
+
+# Set ownership to UID/GID 1000 (since anonuid=1000,anongid=1000)
+# Even if user 'ubuntu' doesn't exist, numeric UID works
+chown -R 1000:1000 /shares/kubernetes
+
+# Set permissions (777 is acceptable for this use case with trusted clients)
+chmod -R 777 /shares/kubernetes
+
+# Configure exports
+cat > /etc/exports <<EOF
+/shares/kubernetes/StorageClass/Delete  10.0.0.0/24(rw,sync,all_squash,anonuid=1000,anongid=1000,no_subtree_check,no_wdelay)
+/shares/kubernetes/StorageClass/Retain 10.0.0.0/24(rw,sync,all_squash,anonuid=1000,anongid=1000,no_subtree_check,no_wdelay)
+EOF
+
+# Apply exports
+exportfs -ra
+
+# Restart NFS to ensure settings are loaded (optional but safe)
+systemctl restart nfs-kernel-server
+
+
+# Verification
+
+exportfs -rv
+
+journalctl -xeu nfs-server

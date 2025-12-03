@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: testing01
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: v1.28
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nfs-test-claim
+  namespace: testing01
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: nfs-delete
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-test-pod
+  namespace: testing01
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command:
+        - sh
+        - -c
+        - "echo Hello from NFS > /data/hello.txt && sleep 3600"
+      volumeMounts:
+        - name: nfs-vol
+          mountPath: /data
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+  volumes:
+    - name: nfs-vol
+      persistentVolumeClaim:
+        claimName: nfs-test-claim
