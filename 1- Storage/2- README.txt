@@ -3,6 +3,7 @@ NFS-Server Should Already Configured And Running Only Then Run This...
 
 showmount -e  10.0.0.1
 
+_________________________________________________________________________________________
 
  
 # Ensure repo is up-to-date
@@ -29,12 +30,7 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=csi-driver-nfs
 kubectl get csidrivers nfs.csi.k8s.io
 helm list -n kube-system | grep csi-driver-nfs
 
-
-
 _________________________________________________________________________________________
-
-
-
 
 
 Create Storage Class
@@ -47,8 +43,7 @@ Create Storage Class
 # kubectl describe sc nfs-delete
 # kubectl describe sc nfs-retain
 
-
-
+_________________________________________________________________________________________
 
 
 Test Storage Class (Delete)
@@ -59,4 +54,5 @@ Test Storage Class (Delete)
 # kubectl get pods -n testing01
 
 # kubectl exec -n testing01 -it nfs-test-pod -- cat /data/hello.txt
+
 
