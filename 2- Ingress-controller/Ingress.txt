@@ -1,0 +1,93 @@
+# Install Ingress
+
+
+
+helm search repo ingress-nginx
+
+
+
+# Add Helm Repo
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+helm search repo ingress-nginx  # Check Ingress Version
+
+
+
+# Fresh Helm Install
+
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --version 4.14.0 \
+  --set controller.service.type=NodePort \
+  --set controller.nodePorts.http=30080 \
+  --set controller.nodePorts.https=30443
+
+
+
+
+#Verify Installation
+
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+kubectl get ingressclass
+
+# From any node
+curl http://10.0.0.201:30080  # Should show 404 (working)
+
+
+kubectl -n ingress-nginx scale deployment ingress-nginx-controller --replicas=2
+
+
+
+____________________________________________________________________________________
+
+
+root@kube-bastion:~# kubectl get svc -n ingress-nginx
+NAME                                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.99.221.207    <none>        80:31041/TCP,443:31212/TCP   13m
+ingress-nginx-controller-admission   ClusterIP   10.105.202.233   <none>        443/TCP                      13m
+
+
+# Check Port Number
+
+
+
+# On SVC node change haproxy file
+
+vi /etc/haproxy/haproxy.cfg
+
+frontend kube_http_ingress_frontend
+    bind :80
+    mode tcp
+    default_backend kube_http_ingress_backend
+
+backend kube_http_ingress_backend
+    mode tcp
+    balance roundrobin
+    server kube-w-1 10.0.0.211:31041 check
+    server kube-w-2 10.0.0.212:31041 check
+
+
+
+frontend kube_https_ingress_frontend
+    bind :443
+    mode tcp
+    default_backend kube_https_ingress_backend
+
+backend kube_https_ingress_backend
+    mode tcp
+    balance roundrobin
+    server kube-w-1 10.0.0.211:31212 check
+    server kube-w-2 10.0.0.212:31212 check
+
+
+
+systemctl restart haproxy
+systemctl status haproxy
+
+
+______________________________________________________________________________________
+
