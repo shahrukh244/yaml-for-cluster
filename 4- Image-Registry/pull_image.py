@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
 """
-Sync multiple latest images to local registry with version tags.
-ONLY EDIT THE TOP SECTION TO ADD/REMOVE IMAGES
+Sync images to local registry with intelligent version handling.
+
+Two types of images supported:
+1. SIMPLE IMAGES: 'nginx', 'httpd', 'mysql'
+   - Pulls :latest tag
+   - Detects actual version inside container
+   - Tags/pushes as registry.kube.lan/<image>:<detected_version>
+   - Cleans up local :latest tag
+
+2. VERSIONED IMAGES: 'openshift/hello-openshift:v3.9.0', 'ubuntu:24.04'
+   - Pulls exact image:tag as specified
+   - Pushes to registry with same tag (no version detection)
+   - Cleans up original pulled image after push
+   - Keeps only the registry-tagged version
+
+ONLY EDIT THE TOP SECTION TO CONFIGURE IMAGES
 """
 
 # ===== USER CONFIGURATION - ONLY EDIT THIS SECTION =====
-IMAGES_TO_SYNC = ['nginx', 'httpd', 'mysql']  # ADD YOUR IMAGE NAMES HERE
+# Simple images (will pull :latest and detect actual version)
+SIMPLE_IMAGES = ['nginx', 'httpd', 'mysql']
+# Images with explicit versions/tags (will pull and push exactly as specified)
+VERSIONED_IMAGES = ['openshift/hello-openshift:v3.9.0', 'ubuntu:24.04']
 REGISTRY = "registry.kube.lan"  # Your local registry
 # ===== END USER CONFIGURATION =====
 
@@ -15,7 +32,7 @@ import re
 import json
 import os
 
-# Built-in configuration for common images (pre-verified in your environment)
+# Built-in configuration for simple images only (version detection)
 IMAGE_CONFIG = {
     "nginx": {
         "version_cmd": "nginx -v",
@@ -28,18 +45,6 @@ IMAGE_CONFIG = {
     "mysql": {
         "version_cmd": "mysqld --version",
         "version_pattern": r'Ver\s+([\d.]+)'
-    },
-    "alpine": {
-        "version_cmd": "cat /etc/alpine-release",
-        "version_pattern": r'([\d.]+)'
-    },
-    "redis": {
-        "version_cmd": "redis-server --version",
-        "version_pattern": r'version=(\d+\.\d+\.\d+)'
-    },
-    "ubuntu": {
-        "version_cmd": "grep VERSION_ID /etc/os-release",
-        "version_pattern": r'VERSION_ID="([\d.]+)"'
     }
 }
 
@@ -64,9 +69,9 @@ def run_command(cmd, capture_output=True, check=True):
         return None
 
 def get_image_version(image_name):
-    """Automatically detect version using built-in configurations."""
+    """Detect version for simple images only."""
     if image_name not in IMAGE_CONFIG:
-        print(f"❌ Unsupported image: {image_name}. Supported: {', '.join(IMAGE_CONFIG.keys())}", file=sys.stderr)
+        print(f"❌ Unsupported simple image: {image_name}. Supported: {', '.join(IMAGE_CONFIG.keys())}", file=sys.stderr)
         return None
     
     config = IMAGE_CONFIG[image_name]
@@ -84,9 +89,9 @@ def get_image_version(image_name):
         print(f"❌ Failed to extract version for {image_name}. Output:\n{output}", file=sys.stderr)
         return None
 
-def image_exists_in_registry(registry, image_name, version):
-    """Check if image exists in registry."""
-    repo = f"{registry}/{image_name}:{version}"
+def image_exists_in_registry(registry, image_name, tag):
+    """Check if image exists in registry with specific tag."""
+    repo = f"{registry}/{image_name}:{tag}"
     
     # Try manifest inspect first
     manifest_cmd = f"docker manifest inspect {repo} >/dev/null 2>&1"
@@ -120,58 +125,127 @@ def configure_docker_experimental():
     with open(config_path, 'w') as f:
         json.dump({"experimental": "enabled"}, f)
 
+def process_simple_image(image):
+    """Process simple images (detect version workflow)."""
+    latest_tag = f"{image}:latest"
+    print(f"🔄 Processing SIMPLE image: {image}")
+    
+    try:
+        # Pull latest image
+        print(f"🐳 Pulling {latest_tag}...")
+        run_command(f"docker pull {latest_tag}", capture_output=False)
+
+        # Detect version
+        print("🔍 Detecting version...")
+        version = get_image_version(image)
+        if not version:
+            return False
+            
+        print(f"✅ Detected version: {version}")
+
+        target_image = f"{REGISTRY}/{image}:{version}"
+
+        # Check registry and push if needed
+        print(f"CallCheck if {target_image} exists...")
+        if image_exists_in_registry(REGISTRY, image, version):
+            print(f"✅ Already exists in registry. Skipping push.")
+        else:
+            print(f"🏷️  Tagging as {target_image}")
+            run_command(f"docker tag {latest_tag} {target_image}")
+            
+            print(f"⏫ Pushing to registry...")
+            run_command(f"docker push {target_image}", capture_output=False)
+
+        return True
+
+    finally:
+        # ALWAYS clean up the latest tag for simple images
+        print(f"🧹 Cleaning up {latest_tag}")
+        run_command(f"docker rmi {latest_tag}", check=False)
+
+def process_versioned_image(full_image):
+    """Process versioned images (exact tag workflow)."""
+    print(f"🔄 Processing VERSIONED image: {full_image}")
+    
+    # Parse image name and tag
+    if ':' not in full_image:
+        print(f"❌ Invalid versioned image format: {full_image}. Must contain a tag (e.g., ubuntu:24.04)", file=sys.stderr)
+        return False
+    
+    image_parts = full_image.split(':', 1)
+    source_image = image_parts[0]
+    source_tag = image_parts[1]
+    
+    # Determine target name and tag
+    # If image has path (like openshift/hello-openshift), convert to hyphenated name
+    # If image is simple (like ubuntu), just use the name
+    if '/' in source_image:
+        target_name = source_image.replace('/', '-')
+        print(f"📝 Converting path: {source_image} → {target_name}")
+    else:
+        target_name = source_image
+    
+    try:
+        # Pull the exact image
+        print(f"🐳 Pulling {full_image}...")
+        if run_command(f"docker pull {full_image}", capture_output=False) is None:
+            return False
+        
+        target_image = f"{REGISTRY}/{target_name}:{source_tag}"
+        
+        # Check if already in registry
+        print(f"CallCheck if {target_image} exists...")
+        if image_exists_in_registry(REGISTRY, target_name, source_tag):
+            print(f"✅ Already exists in registry. Skipping push.")
+            return True
+        
+        # Tag and push
+        print(f"🏷️  Tagging as {target_image}")
+        if run_command(f"docker tag {full_image} {target_image}") is None:
+            return False
+        
+        print(f"⏫ Pushing to registry...")
+        if run_command(f"docker push {target_image}", capture_output=False) is None:
+            return False
+        
+        return True
+
+    finally:
+        # ALWAYS clean up the original pulled image for versioned images
+        print(f"🧹 Cleaning up {full_image}")
+        run_command(f"docker rmi {full_image}", check=False)
+
 def main():
     configure_docker_experimental()
 
-    print(f"🚀 Starting sync for {len(IMAGES_TO_SYNC)} images to {REGISTRY}")
-    print(f"SupportedContent: {', '.join(IMAGE_CONFIG.keys())}")
-    print(f"Selected images: {', '.join(IMAGES_TO_SYNC)}\n")
+    total_images = len(SIMPLE_IMAGES) + len(VERSIONED_IMAGES)
+    print(f"🚀 Starting sync for {total_images} images to {REGISTRY}")
+    print(f"Simple images (version detection): {', '.join(SIMPLE_IMAGES)}")
+    print(f"Versioned images (exact tags): {', '.join(VERSIONED_IMAGES)}\n")
 
-    any_failed = False
-    for image in IMAGES_TO_SYNC:
-        latest_tag = f"{image}:latest"
-        print(f"{'='*50}")
-        print(f"🔄 Processing: {image}")
-        
-        try:
-            # Pull latest image
-            print(f"🐳 Pulling {latest_tag}...")
-            run_command(f"docker pull {latest_tag}", capture_output=False)
+    failed_images = []
+    
+    # Process simple images
+    for image in SIMPLE_IMAGES:
+        print(f"{'='*60}")
+        if not process_simple_image(image):
+            failed_images.append(f"simple:{image}")
+    
+    # Process versioned images
+    for full_image in VERSIONED_IMAGES:
+        print(f"{'='*60}")
+        if not process_versioned_image(full_image):
+            failed_images.append(f"versioned:{full_image}")
 
-            # Detect version
-            print("🔍 Detecting version...")
-            version = get_image_version(image)
-            if not version:
-                any_failed = True
-                continue
-                
-            print(f"✅ Detected version: {version}")
-
-            target_image = f"{REGISTRY}/{image}:{version}"
-
-            # Check registry and push if needed
-            print(f"CallCheck if {target_image} exists...")
-            if image_exists_in_registry(REGISTRY, image, version):
-                print(f"✅ Already exists in registry. Skipping push.")
-            else:
-                print(f"🏷️  Tagging as {target_image}")
-                run_command(f"docker tag {latest_tag} {target_image}")
-                
-                print(f"⏫ Pushing to registry...")
-                run_command(f"docker push {target_image}", capture_output=False)
-
-        finally:
-            # ALWAYS clean up the latest tag, even on failure
-            print(f"🧹 Cleaning up {latest_tag}")
-            run_command(f"docker rmi {latest_tag}", check=False)
-
-    print(f"\n{'='*50}")
-    if any_failed:
-        print("⚠️  SOME IMAGES FAILED TO SYNC - CHECK LOGS ABOVE")
+    print(f"\n{'='*60}")
+    if failed_images:
+        print(f"⚠️  {len(failed_images)}/{total_images} IMAGES FAILED TO SYNC")
+        print(f"Failed images: {', '.join(failed_images)}")
         sys.exit(1)
     else:
-        print(f"🎉 ALL IMAGES SYNCED SUCCESSFULLY TO {REGISTRY}")
-        print(f"Images processed: {', '.join(IMAGES_TO_SYNC)}")
+        print(f"🎉 ALL {total_images} IMAGES SYNCED SUCCESSFULLY TO {REGISTRY}")
+        print(f"Simple images: {', '.join(SIMPLE_IMAGES)}")
+        print(f"Versioned images: {', '.join(VERSIONED_IMAGES)}")
 
 if __name__ == "__main__":
     main()
