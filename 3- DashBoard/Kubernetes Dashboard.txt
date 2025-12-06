@@ -1,0 +1,172 @@
+Step 1: Install Kubernetes Dashboard 
+
+The official Kubernetes Dashboard is available via its GitHub repo. 
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml 
+
+This will create a namespace called kubernetes-dashboard and deploy all necessary components.
+
+
+
+Step 2: Check the pods and services
+
+kubectl get pods -n kubernetes-dashboard
+kubectl get svc -n kubernetes-dashboard
+
+You should see something like this: 
+
+NAME                        TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+dashboard-metrics-scraper   ClusterIP   10.106.139.148   <none>        8000/TCP  2m
+kubernetes-dashboard        ClusterIP   10.105.199.14    <none>        443/TCP   2m
+
+
+
+
+
+Step 3: Access the Dashboard (choose one method) 
+🔹 Option A: Using kubectl proxy (recommended for dev/testing) 
+
+Start the proxy: 
+
+
+kubectl proxy
+
+
+Then open your browser and go to: 
+
+👉 http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/  
+
+
+
+
+🔹 Option B: Expose as NodePort Service (for external access) 
+
+Edit the service: 
+
+kubectl edit svc kubernetes-dashboard -n kubernetes-dashboard
+
+
+Change: 
+
+type: ClusterIP
+
+to:
+
+type: NodePort
+
+
+
+Save and exit. Then check the assigned port: 
+
+
+kubectl get svc -n kubernetes-dashboard
+
+
+
+Example output: 
+
+
+kubernetes-dashboard   NodePort   10.105.199.14   <none>        443:31234/TCP   5m
+
+
+
+Now you can access it via: 
+
+👉 https://<any-worker-or-master-ip>:31234  
+
+    ⚠️ Make sure you're using HTTPS and accept the certificate if self-signed. 
+     
+
+
+
+
+
+
+
+
+
+Step 4: Create a Service Account for Dashboard Login 
+
+Create a file named dashboard-adminuser.yaml: 
+
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+  namespace: kubernetes-dashboard
+
+
+
+
+Apply it:
+
+kubectl apply -f dashboard-adminuser.yaml
+
+
+
+
+
+
+
+Step 5: Get the Bearer Token 
+
+To log in to the dashboard, you'll need the token: 
+
+
+
+
+kubectl -n kubernetes-dashboard create token admin-user
+
+
+
+This will output a long token string — copy it and paste into the Dashboard login screen when prompted.
+
+
+
+
+
+
+
+
+
+
+Optional: Use Kubeconfig File 
+
+Alternatively, you can use your existing ~/.kube/config file to authenticate if the dashboard supports kubeconfig upload (some versions do). 
+🧠 Notes: 
+
+    If you're behind a corporate proxy or firewall, ensure ports 443 and 8000 are accessible.
+    For production, consider securing the dashboard with Ingress + TLS + authentication provider (e.g., OIDC).
+    Always protect access to the dashboard with strong authentication and authorization.
+     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
