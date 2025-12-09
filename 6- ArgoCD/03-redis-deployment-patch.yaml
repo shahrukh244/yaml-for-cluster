@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-redis
+  namespace: argocd
+spec:
+  template:
+    spec:
+  template:
+    spec:
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: argocd-redis-pvc
+      containers:
+      - name: redis
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+ 
