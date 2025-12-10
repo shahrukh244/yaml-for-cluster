@@ -17,4 +17,3 @@ spec:
         volumeMounts:
         - name: redis-data
           mountPath: /data
- 
